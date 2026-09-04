@@ -138,4 +138,4 @@ If you encounter package errors:
 2. Verify `diamonds.csv` is in the same folder as `.Rmd`
 3. Update R and R Studio to latest versions
 
-Good luck! 📊
+
