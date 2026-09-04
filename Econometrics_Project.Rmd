@@ -1,0 +1,392 @@
+---
+title: "Econometrics Project"
+author: "Kekeli & Samson"
+date: "2026-03-20"
+output: word_document
+---
+
+```{r, warning=FALSE}
+# Data Initialization -----------------------------------------------------
+
+library(tidyquant)
+library(dplyr)
+library(reshape2)
+library(forecast)
+library(ggplot2)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+
+
+Diamond <- read_csv("diamonds.csv")
+
+Diamond$cut <- as.factor(Diamond$cut)
+Diamond$color <- as.factor(Diamond$color)
+Diamond$clarity <- as.factor(Diamond$clarity)
+
+
+```
+
+
+```{r}
+library(tidyquant)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(scales)
+library(gridExtra)
+
+Diamond <- read_csv("diamonds.csv")
+Diamond$cut     <- factor(Diamond$cut,     levels = c("Fair","Good","Very Good","Premium","Ideal"))
+Diamond$color   <- factor(Diamond$color,   levels = c("J","I","H","G","F","E","D"))
+Diamond$clarity <- factor(Diamond$clarity, levels = c("I1","SI2","SI1","VS2","VS1","VVS2","VVS1","IF"))
+
+# 1. Price distribution (raw vs log) --------------------------------------
+p1 <- ggplot(Diamond, aes(x = price)) +
+  geom_histogram(bins = 80, fill = "#2C7BB6", color = "white", linewidth = 0.2) +
+  scale_x_continuous(labels = dollar_format()) +
+  labs(title = "Figure 1A: Price Distribution (Level)", x = "Price (USD)", y = "Frequency") +
+  theme_minimal(base_size = 12)
+
+p2 <- ggplot(Diamond, aes(x = log(price))) +
+  geom_histogram(bins = 80, fill = "#D7191C", color = "white", linewidth = 0.2) +
+  labs(title = "Figure 1B: Price Distribution (Log-Transformed)", x = "ln(Price)", y = "Frequency") +
+  theme_minimal(base_size = 12)
+
+grid.arrange(p1, p2, ncol = 2)
+
+# 2. Carat vs Price — the main relationship + log scale ------------------
+p3 <- ggplot(Diamond, aes(x = carat, y = price)) +
+  geom_point(alpha = 0.08, color = "#2C7BB6", size = 0.6) +
+  geom_smooth(method = "loess", color = "#D7191C", se = FALSE, linewidth = 1) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Figure 2A: Transaction Price vs. Carat Weight", x = "Carat Weight", y = "Price (USD)") +
+  theme_minimal(base_size = 12)
+
+p4 <- ggplot(Diamond, aes(x = log(carat), y = log(price))) +
+  geom_point(alpha = 0.08, color = "#2C7BB6", size = 0.6) +
+  geom_smooth(method = "lm", color = "#D7191C", se = FALSE, linewidth = 1) +
+  labs(title = "Figure 2B: Log-Price vs. Log-Carat Weight", x = "ln(Carat Weight)", y = "ln(Price)") +
+  theme_minimal(base_size = 12)
+
+grid.arrange(p3, p4, ncol = 2)
+
+# 3. Psychological thresholds — density near round carat numbers ----------
+Diamond_sub <- Diamond %>% filter(carat >= 0.8, carat <= 2.2)
+
+ggplot(Diamond_sub, aes(x = carat)) +
+  geom_histogram(binwidth = 0.01, fill = "#2C7BB6", color = "white", linewidth = 0.1) +
+  geom_vline(xintercept = c(1.0, 1.5, 2.0), color = "#D7191C", linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = c(1.02, 1.52, 2.02), y = Inf, label = c("1.0ct", "1.5ct", "2.0ct"), hjust = 0, vjust = 1.5, color = "#D7191C", size = 3.5) +
+  labs(title = "Figure 3: Density of Carat Weights Near Psychological Thresholds", x = "Carat Weight", y = "Frequency") +
+  theme_minimal(base_size = 12)
+
+# 4. Boxplots: price by each categorical variable -------------------------
+p5 <- ggplot(Diamond, aes(x = cut, y = price, fill = cut)) +
+  geom_boxplot(outlier.size = 0.3, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_fill_brewer(palette = "Blues") +
+  labs(title = "Figure 4A: Price Distribution by Cut Grade", x = NULL, y = "Price (USD)") +
+  theme_minimal(base_size = 11) + theme(legend.position = "none")
+
+p6 <- ggplot(Diamond, aes(x = color, y = price, fill = color)) +
+  geom_boxplot(outlier.size = 0.3, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_fill_brewer(palette = "Oranges") +
+  labs(title = "Figure 4B: Price Distribution by Color Grade", x = NULL, y = "Price (USD)") +
+  theme_minimal(base_size = 11) + theme(legend.position = "none")
+
+p7 <- ggplot(Diamond, aes(x = clarity, y = price, fill = clarity)) +
+  geom_boxplot(outlier.size = 0.3, outlier.alpha = 0.3) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_fill_brewer(palette = "Greens") +
+  labs(title = "Figure 4C: Price Distribution by Clarity Grade", x = NULL, y = "Price (USD)") +
+  theme_minimal(base_size = 11) + theme(legend.position = "none")
+
+grid.arrange(p5, p6, p7, ncol = 1)
+
+# 5. Carat vs Price faceted by Cut — interaction visual -------------------
+ggplot(Diamond, aes(x = carat, y = price, color = cut)) +
+  geom_point(alpha = 0.07, size = 0.5) +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 0.9) +
+  facet_wrap(~cut, nrow = 1) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_color_brewer(palette = "RdYlBu") +
+  labs(title = "Figure 5: Carat-Price Relationship Conditioned on Cut Grade", x = "Carat Weight", y = "Price (USD)") +
+  theme_minimal(base_size = 11) + theme(legend.position = "none")
+
+# 6. Residual variance by carat — motivates heteroscedasticity tests ------
+model_prelim <- lm(price ~ carat + as.integer(cut) + as.integer(color) + as.integer(clarity), data = Diamond)
+Diamond$resid_sq <- residuals(model_prelim)^2
+
+ggplot(Diamond, aes(x = carat, y = sqrt(abs(residuals(model_prelim))))) +
+  geom_point(alpha = 0.07, size = 0.5, color = "#2C7BB6") +
+  geom_smooth(method = "loess", color = "#D7191C", se = FALSE, linewidth = 1) +
+  labs(title = "Figure 6: Residual Scale-Location Plot", x = "Carat Weight", y = expression(sqrt("|Residuals|"))) +
+  theme_minimal(base_size = 12)
+
+
+```
+
+
+
+```{r}
+# Data Initialization -----------------------------------------------------
+
+library(tidyquant)
+library(dplyr)
+library(reshape2)
+library(forecast)
+library(ggplot2)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+
+Diamond <- read_csv("diamonds.csv")
+
+Diamond$cut <- as.factor(Diamond$cut)
+Diamond$color <- as.factor(Diamond$color)
+Diamond$clarity <- as.factor(Diamond$clarity)
+
+# Part a ------------------------------------------------------------------
+
+model1 <- lm(price ~ ., Diamond)
+summary(model1)
+
+# Part b ------------------------------------------------------------------
+
+regtree <- rpart(price ~ .,
+                 data = Diamond[,c(5,7)],
+                 control = rpart.control(maxdepth = 2),
+                 method = "anova")
+
+rpart.plot(regtree, digits = -1)
+
+Diamond$widthCat <- ifelse(Diamond$width<6,1,
+                           ifelse(Diamond$width>=7,3,2))
+
+model1 <- lm(price ~ ., Diamond[,-7])
+summary(model1)
+
+# Part c ------------------------------------------------------------------
+
+Diamond <- arrange(Diamond, desc(price))
+Top5Actual <- head(Diamond, 5)
+Bottom5Actual <- tail(Diamond, 5)
+
+LimitedDiamond<- aggregate(price ~ weight + cut + color + clarity, 
+                           Diamond, 
+                           FUN = mean)
+
+LimitedDiamond <- arrange(LimitedDiamond, desc(price))
+Top5Average <- head(LimitedDiamond, 5)
+Bottom5Average <- tail(LimitedDiamond, 5)
+
+rf <- randomForest(price ~ weight + cut + color + clarity,
+                   data = Diamond, 
+                   ntree = 200,
+                   mtry = 4, 
+                   nodesize = 500, 
+                   importance = TRUE)
+
+combinations <- expand.grid(
+  weight = unique(Diamond$weight),
+  cut = unique(Diamond$cut),
+  color = unique(Diamond$color),
+  clarity = unique(Diamond$clarity)
+)
+
+combinations$predict <- predict(rf, combinations)
+
+combinations <- arrange(combinations, desc(predict))
+Top5 <- head(combinations, 5)
+Bottom5 <- tail(combinations, 5)
+
+# Bagging and Boosting---------------------------------------------------
+
+library(adabag)
+library(rpart)
+library(caret)
+library(forecast)
+library(ipred)
+library(gbm)
+library(randomForest)
+set.seed(1)
+
+diamonds.df <- read.csv("diamonds.csv")
+
+# transform cut, color, and clarity into categorical variable
+diamonds.df$cut <- as.factor(diamonds.df$cut)
+diamonds.df$color <- as.factor(diamonds.df$color)
+diamonds.df$clarity <- as.factor(diamonds.df$clarity)
+
+# partition the data
+train.index <- sample(c(1:dim(diamonds.df)[1]), dim(diamonds.df)[1]*0.7)
+train.df <- diamonds.df[train.index, ]
+valid.df <- diamonds.df[-train.index, ]
+
+# single tree
+tr <- rpart(price ~ ., data = train.df)
+valid.df$tree <- predict(tr, valid.df[,-5])
+
+# Random forest
+
+rf <- randomForest(price ~ ., 
+                   ntree = 200,
+                   mtry = 4, 
+                   nodesize = 500,
+                   data = train.df)
+
+# Predict prices for the validation dataset using random forest
+valid.df$forest <- predict(rf, valid.df[, -c(5,9)])
+
+# Bagging
+bagged_model <- bagging(price ~ ., data = train.df)
+
+# Predict prices for the validation dataset using bagged model
+valid.df$bag <- predict(bagged_model, valid.df[, -c(5,9,10)])
+
+# Boosting
+boosted_model <- gbm(price ~ ., data = train.df)
+
+# Predict prices for the validation dataset using boosted model
+valid.df$boost <- predict(boosted_model, valid.df[, -c(5,9,10,11)])
+
+# Compare model performance
+
+accuracy(valid.df$tree, valid.df$price)
+accuracy(valid.df$forest, valid.df$price)
+accuracy(valid.df$bag, valid.df$price)
+accuracy(valid.df$boost, valid.df$price)
+
+```
+
+
+```{r, warning=FALSE}
+# 0. Setup and Data Initialization ----------------------------------------
+library(tidyquant)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(lmtest)    # For heteroscedasticity tests
+library(sandwich)  # For robust standard errors
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(ipred)     # For bagging
+library(gbm)       # For boosting
+library(forecast)  # For accuracy metrics
+
+set.seed(42) # Ensure full reproducibility
+
+# Load data
+Diamond <- read_csv("diamonds.csv")
+
+# Encode categorical factors
+Diamond$cut     <- factor(Diamond$cut, levels = c("Fair","Good","Very Good","Premium","Ideal"))
+Diamond$color   <- factor(Diamond$color, levels = c("J","I","H","G","F","E","D"))
+Diamond$clarity <- factor(Diamond$clarity, levels = c("I1","SI2","SI1","VS2","VS1","VVS2","VVS1","IF"))
+
+# Partition the data (70% Training, 30% Test)
+train_index <- sample(seq_len(nrow(Diamond)), size = 0.7 * nrow(Diamond))
+train_df <- Diamond[train_index, ]
+test_df  <- Diamond[-train_index, ]
+
+# 1. Parametric OLS Models (Trained on 70% split) -------------------------
+
+# Model 1: Baseline Linear (Integer encoding)
+model1 <- lm(price ~ carat + as.integer(cut) + as.integer(color) + as.integer(clarity) + 
+               length + width + depth, data = train_df)
+
+# Model 2: Log-Linear Baseline
+model2 <- lm(log(price) ~ carat + as.integer(cut) + as.integer(color) + as.integer(clarity) + 
+               length + width + depth, data = train_df)
+
+# Model 3: Dummy Variables
+model3 <- lm(log(price) ~ carat + cut + color + clarity + length + width + depth, data = train_df)
+
+# Model 4: Carat x Cut Interaction
+model4 <- lm(log(price) ~ carat * cut + color + clarity + length + width + depth, data = train_df)
+
+# Model 5: Carat x Clarity Interaction
+model5 <- lm(log(price) ~ carat * clarity + cut + color + length + width + depth, data = train_df)
+
+
+# 2. Heteroscedasticity Diagnostics & Remedies (Section V) ----------------
+
+# Breusch-Pagan Test (Studentized by default in bptest)
+bp_test <- bptest(model3)
+print(bp_test)
+
+# Goldfeld-Quandt Test (Sorting by Carat)
+gq_test <- gqtest(model3, order.by = ~carat, data = train_df)
+print(gq_test)
+
+# Remediation: Heteroscedasticity-Consistent (HC3) Standard Errors
+model3_robust <- coeftest(model3, vcov = vcovHC(model3, type = "HC3"))
+# Note: Use summary(model1), summary(model3), or print(model3_robust) in your console to get coefficient tables for the paper.
+
+
+# 3. Non-Parametric Machine Learning Models -------------------------------
+
+# A. Regression Tree (CART)
+tree_model <- rpart(price ~ carat + cut + color + clarity + length + width + depth, 
+                    data = train_df, method = "anova", control = rpart.control(maxdepth = 4))
+test_df$pred_tree <- predict(tree_model, test_df)
+
+# B. Bagging
+bag_model <- bagging(price ~ carat + cut + color + clarity + length + width + depth, 
+                     data = train_df, nbagg = 50)
+test_df$pred_bag <- predict(bag_model, test_df)
+
+# C. Random Forest
+rf_model <- randomForest(price ~ carat + cut + color + clarity + length + width + depth, 
+                         data = train_df, ntree = 200, mtry = 4, nodesize = 500, importance = TRUE)
+test_df$pred_rf <- predict(rf_model, test_df)
+
+# D. Gradient Boosting
+boost_model <- gbm(price ~ carat + cut + color + clarity + length + width + depth, 
+                   data = train_df, distribution = "gaussian", n.trees = 200, interaction.depth = 4, shrinkage = 0.1)
+test_df$pred_boost <- predict(boost_model, test_df, n.trees = 200)
+
+
+# 4. Model Performance Evaluation (Test Set) ------------------------------
+
+# A. OLS Predictions (Requires exponentiating Models 3, 4, and 5 to get dollars)
+test_df$pred_m1 <- predict(model1, test_df)
+test_df$pred_m3 <- exp(predict(model3, test_df))
+test_df$pred_m4 <- exp(predict(model4, test_df))
+test_df$pred_m5 <- exp(predict(model5, test_df))
+
+cat("\n--- Out-of-Sample Accuracy: Parametric Models ---\n")
+cat("Model 1 (Baseline Linear):\n")
+print(accuracy(test_df$pred_m1, test_df$price))
+
+cat("\nModel 3 (Dummy Variables):\n")
+print(accuracy(test_df$pred_m3, test_df$price))
+
+cat("\nModel 4 (Carat x Cut):\n")
+print(accuracy(test_df$pred_m4, test_df$price))
+
+cat("\nModel 5 (Carat x Clarity):\n")
+print(accuracy(test_df$pred_m5, test_df$price))
+
+# B. ML Predictions
+cat("\n--- Out-of-Sample Accuracy: Non-Parametric Models ---\n")
+cat("Regression Tree:\n")
+print(accuracy(test_df$pred_tree, test_df$price))
+
+cat("\nBagging:\n")
+print(accuracy(test_df$pred_bag, test_df$price))
+
+cat("\nRandom Forest:\n")
+print(accuracy(test_df$pred_rf, test_df$price))
+
+cat("\nGradient Boosting:\n")
+print(accuracy(test_df$pred_boost, test_df$price))
+```
+
+
+
